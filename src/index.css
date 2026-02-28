@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 142.1 76.2% 36.3%;
+    --primary-foreground: 355.7 100% 97.3%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 85.7% 97.3%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 142.1 76.2% 36.3%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom scrollbar for dark mode */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Log line styling */
+.log-line {
+  @apply font-mono text-sm leading-relaxed;
+}
+
+.log-timestamp {
+  @apply text-muted-foreground mr-2;
+}
+
+.log-level-info {
+  @apply text-blue-400;
+}
+
+.log-level-warn {
+  @apply text-yellow-400;
+}
+
+.log-level-error {
+  @apply text-red-400;
+}
+
+.log-level-debug {
+  @apply text-muted-foreground;
+}
+
+/* Thinking block */
+.thinking-block {
+  @apply bg-muted/30 border-l-2 border-purple-500/50 pl-3 py-1 rounded-r;
+}
+
+/* Tool call block */
+.tool-call-block {
+  @apply bg-muted/30 border-l-2 border-cyan-500/50 pl-3 py-1 rounded-r;
+}
+
+/* User prompt block */
+.user-prompt-block {
+  @apply bg-primary/10 border-l-2 border-primary pl-3 py-1 rounded-r;
+}
+
+/* Response block */
+.response-block {
+  @apply bg-green-500/10 border-l-2 border-green-500 pl-3 py-1 rounded-r;
+}
