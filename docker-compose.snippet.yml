@@ -1,0 +1,23 @@
+# OpenClaw DevTools - Docker Compose Snippet
+# Add this to your existing docker-compose.yml
+
+  openclaw-devtools:
+    build:
+      context: ./devtools
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - openclaw-gateway
+    restart: unless-stopped
+    networks:
+      - default
+
+# Or if you want to use a pre-built image:
+#  openclaw-devtools:
+#    image: ghcr.io/ellickjohnson/openclaw-devtools:latest
+#    ports:
+#      - "3000:3000"
+#    depends_on:
+#      - openclaw-gateway
+#    restart: unless-stopped
