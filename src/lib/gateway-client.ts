@@ -90,15 +90,37 @@ export class GatewayClient {
         console.log('[DevTools] Connected to OpenClaw gateway');
         this.reconnectDelay = 1000;
         
-        // Send connect message with auth token first (must be a request frame)
+        // Send connect message with proper params (must be a request frame)
+        const connectParams: {
+          minProtocol: number;
+          maxProtocol: number;
+          client: { id: string; version: string; platform: string; mode: string };
+          role: string;
+          scopes: string[];
+          auth?: { token: string };
+        } = {
+          minProtocol: 3,
+          maxProtocol: 3,
+          client: {
+            id: 'openclaw-devtools',
+            version: '1.0.0',
+            platform: 'web',
+            mode: 'ui'
+          },
+          role: 'operator',
+          scopes: ['operator.admin', 'operator.approvals', 'operator.pairing']
+        };
+        
         if (this.opts.token) {
-          this.ws?.send(JSON.stringify({
-            type: 'req',
-            id: 'connect-1',
-            method: 'connect',
-            params: { auth: { token: this.opts.token } }
-          }));
+          connectParams.auth = { token: this.opts.token };
         }
+        
+        this.ws?.send(JSON.stringify({
+          type: 'req',
+          id: 'connect-1',
+          method: 'connect',
+          params: connectParams
+        }));
         
         this.opts.onConnect?.();
         
