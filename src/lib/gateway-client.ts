@@ -90,10 +90,12 @@ export class GatewayClient {
         console.log('[DevTools] Connected to OpenClaw gateway');
         this.reconnectDelay = 1000;
         
-        // Send connect message with auth token first
+        // Send connect message with auth token first (must be a request frame)
         if (this.opts.token) {
           this.ws?.send(JSON.stringify({
-            type: 'connect',
+            type: 'req',
+            id: 'connect-1',
+            method: 'connect',
             params: { auth: { token: this.opts.token } }
           }));
         }
