@@ -22,10 +22,28 @@ import { useGateway } from '@/lib/gateway-client'
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || 
   `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
 
+// Get token from URL params or localStorage
+const getGatewayToken = () => {
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('token');
+  if (urlToken) {
+    localStorage.setItem('openclaw-devtools-token', urlToken);
+    // Remove token from URL for security
+    params.delete('token');
+    const newUrl = params.toString() 
+      ? `${window.location.pathname}?${params.toString()}`
+      : window.location.pathname;
+    window.history.replaceState({}, '', newUrl);
+    return urlToken;
+  }
+  return localStorage.getItem('openclaw-devtools-token') || undefined;
+}
+
 function App() {
   const [showSessions, setShowSessions] = useState(true)
   const [showStats, setShowStats] = useState(true)
-  const { connected, logs, sessions, clearLogs } = useGateway(GATEWAY_URL)
+  const token = getGatewayToken()
+  const { connected, logs, sessions, clearLogs } = useGateway(GATEWAY_URL, token)
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
