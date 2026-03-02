@@ -18,7 +18,9 @@ import { SessionPanel } from '@/components/session-panel'
 import { StatsPanel } from '@/components/stats-panel'
 import { useGateway } from '@/lib/gateway-client'
 
-const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || 'ws://localhost:18789'
+// Use relative /ws path so nginx proxies to gateway (works from any host)
+const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || 
+  `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
 
 function App() {
   const [showSessions, setShowSessions] = useState(true)
