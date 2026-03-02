@@ -89,6 +89,15 @@ export class GatewayClient {
       this.ws.onopen = () => {
         console.log('[DevTools] Connected to OpenClaw gateway');
         this.reconnectDelay = 1000;
+        
+        // Send connect message with auth token first
+        if (this.opts.token) {
+          this.ws?.send(JSON.stringify({
+            type: 'connect',
+            params: { auth: { token: this.opts.token } }
+          }));
+        }
+        
         this.opts.onConnect?.();
         
         // Subscribe to logs
@@ -208,7 +217,7 @@ export class GatewayClient {
 // Hook for React components
 import { useEffect, useState, useCallback, useRef } from 'react';
 
-export function useGateway(url: string) {
+export function useGateway(url: string, token?: string) {
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -217,6 +226,7 @@ export function useGateway(url: string) {
   useEffect(() => {
     const client = new GatewayClient({
       url,
+      token,
       onConnect: () => setConnected(true),
       onDisconnect: () => setConnected(false),
       onError: (error) => console.error('[Gateway]', error),
