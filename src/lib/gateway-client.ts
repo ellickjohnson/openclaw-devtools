@@ -75,6 +75,7 @@ export class GatewayClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
   private requestId = 0;
+  private connectPending = false;
 
   constructor(private opts: GatewayClientOptions) {}
 
@@ -82,12 +83,13 @@ export class GatewayClient {
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
     this.closed = false;
+    this.connectPending = false;
     
     try {
       this.ws = new WebSocket(this.opts.url);
 
       this.ws.onopen = () => {
-        console.log('[DevTools] Connected to OpenClaw gateway');
+        console.log('[DevTools] WebSocket connected, sending handshake...');
         this.reconnectDelay = 1000;
         
         // Send connect message with proper params (must be a request frame)
@@ -115,6 +117,25 @@ export class GatewayClient {
           connectParams.auth = { token: this.opts.token };
         }
         
+        // Track connect as pending - we'll wait for response before sending other requests
+        this.connectPending = true;
+        this.pending.set('connect-1', {
+          resolve: () => {
+            this.connectPending = false;
+            console.log('[DevTools] Gateway handshake complete');
+            this.opts.onConnect?.();
+            
+            // NOW subscribe to logs and sessions (after connect succeeds)
+            this.request('logs.tail', { follow: true }).catch(console.error);
+            this.request('sessions.subscribe').catch(console.error);
+          },
+          reject: (err) => {
+            this.connectPending = false;
+            console.error('[DevTools] Gateway handshake failed:', err);
+            this.opts.onError?.(err as Error);
+          }
+        });
+        
         this.ws?.send(JSON.stringify({
           type: 'req',
           id: 'connect-1',
@@ -122,13 +143,15 @@ export class GatewayClient {
           params: connectParams
         }));
         
-        this.opts.onConnect?.();
-        
-        // Subscribe to logs
-        this.request('logs.tail', { follow: true }).catch(console.error);
-        
-        // Subscribe to session updates
-        this.request('sessions.subscribe').catch(console.error);
+        // Timeout for connect
+        setTimeout(() => {
+          if (this.connectPending) {
+            this.connectPending = false;
+            this.pending.delete('connect-1');
+            console.error('[DevTools] Connect timeout');
+            this.ws?.close();
+          }
+        }, 10000);
       };
 
       this.ws.onmessage = (event) => {
