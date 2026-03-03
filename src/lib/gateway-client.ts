@@ -6,7 +6,6 @@ export type GatewayEventFrame = {
   event: string;
   payload?: unknown;
   seq?: number;
-  stateVersion?: { presence: number; health: number };
 };
 
 export type GatewayResponseFrame = {
@@ -23,7 +22,7 @@ export type LogEntry = {
   message: string;
   subsystem?: string;
   sessionId?: string;
-  data?: Record<string, unknown>;
+  raw: string;
 };
 
 export type SessionInfo = {
@@ -38,8 +37,6 @@ export type SessionInfo = {
   createdAt?: string;
   lastActiveAt?: string;
 };
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 
 export type ToolCall = {
   id: string;
@@ -64,9 +61,67 @@ export type GatewayClientOptions = {
   onDisconnect?: () => void;
   onError?: (error: Error) => void;
   onLog?: (log: LogEntry) => void;
+  onLogs?: (logs: LogEntry[]) => void;
   onSessionUpdate?: (sessions: SessionInfo[]) => void;
   onToolCall?: (toolCall: ToolCall) => void;
 };
+
+const LOG_LEVELS = new Set(['trace', 'debug', 'info', 'warn', 'error', 'fatal']);
+
+function parseLogLevel(level: string | undefined): 'debug' | 'info' | 'warn' | 'error' {
+  if (!level) return 'info';
+  const l = level.toLowerCase();
+  if (LOG_LEVELS.has(l)) {
+    if (l === 'trace') return 'debug';
+    return l as 'debug' | 'info' | 'warn' | 'error';
+  }
+  return 'info';
+}
+
+function parseLogLine(line: string): LogEntry {
+  if (!line.trim()) {
+    return { timestamp: new Date().toISOString(), level: 'info', message: '', raw: line };
+  }
+  
+  try {
+    const parsed = JSON.parse(line);
+    const meta = parsed?._meta ?? {};
+    
+    // Extract timestamp
+    const timestamp = parsed.time ?? meta.date ?? new Date().toISOString();
+    
+    // Extract level
+    const level = parseLogLevel(meta.logLevelName ?? meta.level);
+    
+    // Extract subsystem
+    let subsystem: string | undefined;
+    if (typeof parsed[0] === 'string') {
+      try {
+        const parsed0 = JSON.parse(parsed[0]);
+        subsystem = parsed0.subsystem ?? parsed0.module;
+      } catch {}
+    }
+    if (!subsystem && meta.name && meta.name.length < 120) {
+      subsystem = meta.name;
+    }
+    
+    // Extract message
+    let message: string;
+    if (typeof parsed[1] === 'string') {
+      message = parsed[1];
+    } else if (typeof parsed[0] === 'string' && !subsystem) {
+      message = parsed[0];
+    } else if (typeof parsed.message === 'string') {
+      message = parsed.message;
+    } else {
+      message = line;
+    }
+    
+    return { timestamp, level, message, subsystem, raw: line };
+  } catch {
+    return { timestamp: new Date().toISOString(), level: 'info', message: line, raw: line };
+  }
+}
 
 export class GatewayClient {
   private ws: WebSocket | null = null;
@@ -76,6 +131,9 @@ export class GatewayClient {
   private reconnectDelay = 1000;
   private requestId = 0;
   private connectPending = false;
+  private logsCursor: number | undefined;
+  private logsPollInterval: ReturnType<typeof setInterval> | null = null;
+  private sessionsPollInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(private opts: GatewayClientOptions) {}
 
@@ -92,15 +150,7 @@ export class GatewayClient {
         console.log('[DevTools] WebSocket connected, sending handshake...');
         this.reconnectDelay = 1000;
         
-        // Send connect message with proper params (must be a request frame)
-        const connectParams: {
-          minProtocol: number;
-          maxProtocol: number;
-          client: { id: string; version: string; platform: string; mode: string };
-          role: string;
-          scopes: string[];
-          auth?: { token: string };
-        } = {
+        const connectParams = {
           minProtocol: 3,
           maxProtocol: 3,
           client: {
@@ -110,14 +160,10 @@ export class GatewayClient {
             mode: 'ui'
           },
           role: 'operator',
-          scopes: ['operator.admin', 'operator.approvals', 'operator.pairing']
+          scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
+          ...(this.opts.token ? { auth: { token: this.opts.token } } : {})
         };
         
-        if (this.opts.token) {
-          connectParams.auth = { token: this.opts.token };
-        }
-        
-        // Track connect as pending - we'll wait for response before sending other requests
         this.connectPending = true;
         this.pending.set('connect-1', {
           resolve: () => {
@@ -125,9 +171,8 @@ export class GatewayClient {
             console.log('[DevTools] Gateway handshake complete');
             this.opts.onConnect?.();
             
-            // Subscribe to logs (without follow parameter)
-            this.request('logs.tail', {}).catch(console.error);
-            // Note: sessions.subscribe doesn't exist - we'd need to poll sessions.list instead
+            // Start polling for logs and sessions
+            this.startPolling();
           },
           reject: (err) => {
             this.connectPending = false;
@@ -143,7 +188,6 @@ export class GatewayClient {
           params: connectParams
         }));
         
-        // Timeout for connect
         setTimeout(() => {
           if (this.connectPending) {
             this.connectPending = false;
@@ -165,10 +209,11 @@ export class GatewayClient {
 
       this.ws.onclose = () => {
         this.opts.onDisconnect?.();
+        this.stopPolling();
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = (error) => {
+      this.ws.onerror = () => {
         this.opts.onError?.(new Error('WebSocket error'));
       };
     } catch (error) {
@@ -177,8 +222,84 @@ export class GatewayClient {
     }
   }
 
+  private startPolling() {
+    // Initial fetch
+    this.fetchLogs(true);
+    this.fetchSessions();
+    
+    // Poll every 2 seconds
+    this.logsPollInterval = setInterval(() => {
+      this.fetchLogs(false);
+    }, 2000);
+    
+    this.sessionsPollInterval = setInterval(() => {
+      this.fetchSessions();
+    }, 5000);
+  }
+
+  private stopPolling() {
+    if (this.logsPollInterval) {
+      clearInterval(this.logsPollInterval);
+      this.logsPollInterval = null;
+    }
+    if (this.sessionsPollInterval) {
+      clearInterval(this.sessionsPollInterval);
+      this.sessionsPollInterval = null;
+    }
+  }
+
+  private async fetchLogs(reset: boolean) {
+    try {
+      const params: { cursor?: number; limit: number; maxBytes?: number } = {
+        limit: 100
+      };
+      
+      if (!reset && this.logsCursor !== undefined) {
+        params.cursor = this.logsCursor;
+      }
+      
+      const result = await this.request<{ lines?: string[]; cursor?: number; reset?: boolean }>('logs.tail', params);
+      
+      if (result) {
+        const lines = Array.isArray(result.lines) ? result.lines.filter(l => typeof l === 'string') : [];
+        const logs = lines.map(parseLogLine);
+        
+        if (logs.length > 0) {
+          this.opts.onLogs?.(logs);
+          logs.forEach(log => this.opts.onLog?.(log));
+        }
+        
+        if (typeof result.cursor === 'number') {
+          this.logsCursor = result.cursor;
+        }
+        
+        if (result.reset) {
+          this.logsCursor = undefined;
+        }
+      }
+    } catch (err) {
+      console.error('[DevTools] Failed to fetch logs:', err);
+    }
+  }
+
+  private async fetchSessions() {
+    try {
+      const result = await this.request<{ sessions?: SessionInfo[] }>('sessions.list', {
+        activeMinutes: 60,
+        limit: 50
+      });
+      
+      if (result && Array.isArray(result.sessions)) {
+        this.opts.onSessionUpdate?.(result.sessions);
+      }
+    } catch (err) {
+      console.error('[DevTools] Failed to fetch sessions:', err);
+    }
+  }
+
   disconnect() {
     this.closed = true;
+    this.stopPolling();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -220,17 +341,8 @@ export class GatewayClient {
   }
 
   private handleEvent(event: GatewayEventFrame) {
-    switch (event.event) {
-      case 'log':
-        this.opts.onLog?.(event.payload as LogEntry);
-        break;
-      case 'sessions.update':
-        this.opts.onSessionUpdate?.(event.payload as SessionInfo[]);
-        break;
-      case 'tool.call':
-        this.opts.onToolCall?.(event.payload as ToolCall);
-        break;
-    }
+    // Handle any real-time events if needed
+    console.log('[DevTools] Event:', event.event);
   }
 
   request<T = unknown>(method: string, params?: unknown): Promise<T> {
@@ -246,7 +358,6 @@ export class GatewayClient {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       this.ws.send(JSON.stringify(frame));
 
-      // Timeout after 30s
       setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
@@ -277,7 +388,9 @@ export function useGateway(url: string, token?: string) {
       onConnect: () => setConnected(true),
       onDisconnect: () => setConnected(false),
       onError: (error) => console.error('[Gateway]', error),
-      onLog: (log) => setLogs(prev => [...prev.slice(-499), log]),
+      onLogs: (newLogs) => {
+        setLogs(prev => [...prev.slice(-499), ...newLogs]);
+      },
       onSessionUpdate: (s) => setSessions(s),
     });
 
@@ -285,7 +398,7 @@ export function useGateway(url: string, token?: string) {
     clientRef.current = client;
 
     return () => client.disconnect();
-  }, [url]);
+  }, [url, token]);
 
   const clearLogs = useCallback(() => setLogs([]), []);
 
