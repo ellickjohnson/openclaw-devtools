@@ -125,9 +125,9 @@ export class GatewayClient {
             console.log('[DevTools] Gateway handshake complete');
             this.opts.onConnect?.();
             
-            // NOW subscribe to logs and sessions (after connect succeeds)
-            this.request('logs.tail', { follow: true }).catch(console.error);
-            this.request('sessions.subscribe').catch(console.error);
+            // Subscribe to logs (without follow parameter)
+            this.request('logs.tail', {}).catch(console.error);
+            // Note: sessions.subscribe doesn't exist - we'd need to poll sessions.list instead
           },
           reject: (err) => {
             this.connectPending = false;
