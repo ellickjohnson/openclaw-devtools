@@ -22,6 +22,7 @@ export type LogEntry = {
   message: string;
   subsystem?: string;
   sessionId?: string;
+  data?: Record<string, unknown>;
   raw: string;
 };
 
@@ -117,7 +118,7 @@ function parseLogLine(line: string): LogEntry {
       message = line;
     }
     
-    return { timestamp, level, message, subsystem, raw: line };
+    return { timestamp, level, message, subsystem, data: parsed, raw: line };
   } catch {
     return { timestamp: new Date().toISOString(), level: 'info', message: line, raw: line };
   }
